@@ -30,14 +30,7 @@
   "build": {
     "flags": [
       "-DELEGANTOTA_USE_ASYNC_WEBSERVER=1"
-    ]
-  },
-  "export": {
-    "include": [
-      "src/WirelessOTA.h",
-      "src/WirelessOTA.cpp",
-      "library.json",
-      "README.md"
-    ]
+    ],
+    "srcDir": "lib/WirelessOTA"
   }
 }

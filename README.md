@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/31030817/README.md)
 # WirelessOTA
 
 ESP32 的 WiFi + MQTT + Web OTA 通用套件。新專案只要 `#include <WirelessOTA.h>`，
@@ -12,6 +11,9 @@ ESP32 的 WiFi + MQTT + Web OTA 通用套件。新專案只要 `#include <Wirele
 lib_deps =
     https://github.com/andycheng0911/ESP32-wireless-upload.git
 ```
+
+> 如果 `lib-dev` 分支還沒合併回 `main`，要指定分支：
+> `https://github.com/andycheng0911/ESP32-wireless-upload.git#lib-dev`
 
 PlatformIO 會自動抓這個套件，以及它宣告的相依函式庫（AsyncTCP、ESPAsyncWebServer、ElegantOTA、PubSubClient）。
 
@@ -130,6 +132,43 @@ wireless.onConnected(onMqttConnected);
 
 回傳目前連線狀態的bool。
 
-### OTA更新
+## OTA更新（遠端，不需接USB）
 
 網頁固定在 `http://<裝置IP>/update`，有設 `otaUsername`/`otaPassword` 的話會跳出登入視窗。
+
+也可以用 PlatformIO 自訂上傳指令，直接按 Upload 就走網路 OTA，不用打開瀏覽器手動上傳。
+`platformio.ini` 加：
+
+```ini
+upload_protocol = custom
+upload_command = curl.exe -s -u admin:你的OTA密碼 http://192.168.1.132/ota/start && curl.exe -u admin:你的OTA密碼 -F "file=@$SOURCE" http://192.168.1.132/ota/upload
+```
+
+**重點**：
+- 一定要先 `GET /ota/start` 初始化，再 `POST /ota/upload` 上傳，只呼叫 `/ota/upload` 會回 200
+  但實際沒寫入flash。
+- 有設 OTA 帳密保護的話，兩個請求都要帶 `-u 帳號:密碼`，沒帶會收到401，但curl預設不會讓指令
+  失敗、畫面仍會顯示「上傳成功」——這是誤判，裝置其實沒有真的套用新韌體。加 `curl -f`（fail on
+  HTTP error）可以避免誤判。
+- 因為帳密直接寫在 `platformio.ini` 裡，這個檔案若要公開分享，記得改成非敏感密碼，或把
+  `platformio.ini` 也排除在版本控制外。
+
+## 專案內部結構（套件維護者看這段）
+
+```
+ESP32-wireless-upload/
+├── library.json          <- 套件身分證，build.srcDir指向lib/WirelessOTA
+├── lib/
+│   └── WirelessOTA/
+│       ├── WirelessOTA.h
+│       └── WirelessOTA.cpp
+├── src/
+│   ├── main.cpp           <- 這個repo自己作為範例專案使用套件的方式
+│   └── secrets.h           (已gitignore)
+└── docs/                   <- 路由器/Mosquitto/Tailscale設定文件
+```
+
+套件本體放在 `lib/WirelessOTA/`，不是 `src/`，是為了避免外部專案透過 `lib_deps` 抓這個repo
+當套件時，把 `src/main.cpp`（連同它 include 的、不存在的 `secrets.h`）也一起誤判成套件原始碼
+去編譯，導致編譯失敗。`library.json` 裡的 `"build": {"srcDir": "lib/WirelessOTA"}` 明確告訴
+PlatformIO 只用這個資料夾當套件來源。

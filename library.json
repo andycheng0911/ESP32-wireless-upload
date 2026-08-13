@@ -1,0 +1,35 @@
+{
+  "name": "WirelessOTA",
+  "version": "1.0.0",
+  "description": "ESP32 WiFi + MQTT + Web OTA 通用套件（含 ElegantOTA 兩段式上傳）",
+  "keywords": ["esp32", "mqtt", "ota", "wifi"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andycheng0911/ESP32-wireless-upload.git"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {
+      "name": "AsyncTCP",
+      "url": "https://github.com/ESP32Async/AsyncTCP.git"
+    },
+    {
+      "name": "ESPAsyncWebServer",
+      "url": "https://github.com/ESP32Async/ESPAsyncWebServer.git"
+    },
+    {
+      "name": "ElegantOTA",
+      "url": "https://github.com/ayushsharma82/ElegantOTA.git"
+    },
+    {
+      "name": "PubSubClient",
+      "url": "https://github.com/knolleary/pubsubclient.git"
+    }
+  ],
+  "build": {
+    "flags": [
+      "-DELEGANTOTA_USE_ASYNC_WEBSERVER=1"
+    ]
+  }
+}

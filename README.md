@@ -1,122 +1,174 @@
-# ESP32 + OpenWrt MQTT + Web OTA
+# WirelessOTA
 
-在 OpenWrt 路由器上跑 Mosquitto MQTT Broker，讓 ESP32 連上去收發訊息，並透過網頁（ElegantOTA）
-遠端更新韌體 —— 不管人在家裡（區網直連）還是在外面（透過 Tailscale）都能一行指令上傳新程式，
-不需要每次都插 USB 線。
+ESP32 的 WiFi + MQTT + Web OTA 通用套件。新專案只要 `#include <WirelessOTA.h>`，
+給 WiFi 帳密和 MQTT broker IP，就能直接用，不用每次重寫一次連線、重連、OTA的邏輯。
 
-## 架構總覽
+## 安裝
+
+新專案的 `platformio.ini` 加一行：
+
+```ini
+lib_deps =
+    https://github.com/andycheng0911/ESP32-wireless-upload.git
+```
+
+> 如果 `lib-dev` 分支還沒合併回 `main`，要指定分支：
+> `https://github.com/andycheng0911/ESP32-wireless-upload.git#lib-dev`
+
+PlatformIO 會自動抓這個套件，以及它宣告的相依函式庫（AsyncTCP、ESPAsyncWebServer、ElegantOTA、PubSubClient）。
+
+## 最小範例
+
+新專案的 `src/main.cpp`：
+
+```cpp
+#include <WirelessOTA.h>
+#include "secrets.h"   // 自己建立，見下方「secrets.h」說明
+
+WirelessOTA wireless;
+
+void setup() {
+  Serial.begin(115200);
+  wireless.begin(WIFI_SSID, WIFI_PASSWORD, MQTT_SERVER, MQTT_PORT,
+                  OTA_USERNAME, OTA_PASSWORD);
+}
+
+void loop() {
+  wireless.loop();                      // 一定要放，處理WiFi/MQTT自動重連 + OTA
+  wireless.log.println("hello esp32");  // 跟Serial.println用法一樣，同時發布到MQTT
+  delay(3000);
+}
+```
+
+## secrets.h
+
+每個使用這個套件的專案，自己在專案的 `src/` 裡建立 `secrets.h`（記得加進 `.gitignore`，
+不要上傳到GitHub），內容：
+
+```cpp
+#ifndef SECRETS_H
+#define SECRETS_H
+
+#define WIFI_SSID     "你的WiFi名稱"
+#define WIFI_PASSWORD "你的WiFi密碼"
+
+#define MQTT_SERVER   "192.168.1.1"   // 路由器上Mosquitto的IP
+#define MQTT_PORT     1883
+
+#define OTA_USERNAME  "admin"              // OTA網頁的登入帳密，避免任何人都能上傳韌體
+#define OTA_PASSWORD  "change_this_password"
+
+#endif
+```
+
+WiFi帳密、MQTT IP完全不寫在套件裡，套件本身保持通用、不會外洩任何一台裝置的個人資料。
+
+## API
+
+### `wireless.begin(...)`
+
+```cpp
+void begin(const char* ssid,
+           const char* password,
+           const char* mqttHost,
+           uint16_t mqttPort = 1883,
+           const char* otaUsername = nullptr,   // 傳nullptr表示OTA網頁不設密碼
+           const char* otaPassword = nullptr,
+           const char* mqttClientId = "esp32",  // MQTT連線用的client id，多台裝置要取不同名字
+           const char* debugTopic = "esp32/debug/log");  // wireless.log會發布到這個topic
+```
+
+### `wireless.loop()`
+
+放在 `loop()` 最前面呼叫，處理WiFi斷線重連、MQTT斷線重連、MQTT收發、OTA。
+
+### `wireless.log`
+
+跟 `Serial` 用法完全一樣（`print` / `println` / `printf`），差別是每寫完一整行
+（遇到換行）會自動把那一行同步發布到 `debugTopic`，USB Serial也照樣看得到。
+不用再自己寫 `mqttLog()` 這種輔助函式。
+
+```cpp
+wireless.log.println("開機完成");
+wireless.log.printf("溫度: %.1f\n", temperature);
+```
+
+用 `mosquitto_sub -h <MQTT_IP> -t esp32/debug/log` 就能在電腦上即時看遠端裝置的log，
+不需要接USB。
+
+### `wireless.publish(topic, payload, retained=false)` / `wireless.subscribe(topic)`
+
+topic是完整字串，不會自動加任何前綴，自己決定topic命名規則。
+
+```cpp
+wireless.publish("esp32/test/pub", "hello");
+wireless.subscribe("esp32/test/sub");
+```
+
+### `wireless.onMessage(callback)`
+
+註冊收到MQTT訊息時的處理函式：
+
+```cpp
+void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+  // ...
+}
+wireless.onMessage(onMqttMessage);
+```
+
+### `wireless.onConnected(callback)`
+
+每次MQTT連線成功（含斷線重連）都會呼叫一次，適合在裡面呼叫 `subscribe()`，
+確保重連後訂閱不會遺失：
+
+```cpp
+void onMqttConnected() {
+  wireless.subscribe("esp32/test/sub");
+}
+wireless.onConnected(onMqttConnected);
+```
+
+### `wireless.isWifiConnected()` / `wireless.isMqttConnected()`
+
+回傳目前連線狀態的bool。
+
+## OTA更新（遠端，不需接USB）
+
+網頁固定在 `http://<裝置IP>/update`，有設 `otaUsername`/`otaPassword` 的話會跳出登入視窗。
+
+也可以用 PlatformIO 自訂上傳指令，直接按 Upload 就走網路 OTA，不用打開瀏覽器手動上傳。
+`platformio.ini` 加：
+
+```ini
+upload_protocol = custom
+upload_command = curl.exe -s -u admin:你的OTA密碼 http://192.168.1.132/ota/start && curl.exe -u admin:你的OTA密碼 -F "file=@$SOURCE" http://192.168.1.132/ota/upload
+```
+
+**重點**：
+- 一定要先 `GET /ota/start` 初始化，再 `POST /ota/upload` 上傳，只呼叫 `/ota/upload` 會回 200
+  但實際沒寫入flash。
+- 有設 OTA 帳密保護的話，兩個請求都要帶 `-u 帳號:密碼`，沒帶會收到401，但curl預設不會讓指令
+  失敗、畫面仍會顯示「上傳成功」——這是誤判，裝置其實沒有真的套用新韌體。加 `curl -f`（fail on
+  HTTP error）可以避免誤判。
+- 因為帳密直接寫在 `platformio.ini` 裡，這個檔案若要公開分享，記得改成非敏感密碼，或把
+  `platformio.ini` 也排除在版本控制外。
+
+## 專案內部結構（套件維護者看這段）
 
 ```
-你的電腦 ──(Wi-Fi 或 Tailscale)── OpenWrt 路由器(Mosquitto + Tailscale Subnet Router)
-                                          │
-                                          └──(區網 Wi-Fi)── ESP32(MQTT Client + Web OTA)
-```
-
-- **在家**：電腦跟 ESP32 在同一個 Wi-Fi，直接用區網 IP 溝通
-- **遠端**：電腦用任何網路（手機熱點等）+ Tailscale，路由器把區網廣播成 Tailscale Subnet Route，
-  電腦一樣用 ESP32 的區網 IP 就能連到，不需要額外設定 port forwarding
-
-## 功能
-
-- ESP32 自動連上 WiFi、連上 MQTT Broker
-- 每 3 秒發布一次心跳訊息，可訂閱指定 topic 接收指令
-- 所有 log 同時輸出到 Serial 跟 MQTT topic（`esp32/debug/log`），不插 USB 也能遠端看 log
-- 透過 ElegantOTA 提供網頁版韌體上傳（有帳密保護），支援瀏覽器手動上傳或 `pio run -t upload`
-  一行指令自動上傳
-
-## 專案結構
-
-```
-.
-├── platformio.ini          # PlatformIO 設定（函式庫、編譯、上傳方式）
-├── upload_ota.bat          # Windows：一鍵編譯+OTA上傳腳本
+ESP32-wireless-upload/
+├── library.json          <- 套件身分證，build.srcDir指向lib/WirelessOTA
+├── lib/
+│   └── WirelessOTA/
+│       ├── WirelessOTA.h
+│       └── WirelessOTA.cpp
 ├── src/
-│   ├── main.cpp             # 主程式
-│   └── secrets.example.h    # WiFi/MQTT/OTA帳密 範例檔（複製成 secrets.h 使用）
-└── docs/
-    ├── 01-openwrt-mosquitto-setup.md   # 路由器安裝設定 Mosquitto
-    ├── 02-ssh-into-openwrt.md          # 如何 SSH 進 OpenWrt
-    ├── 03-esp32-wifi-mqtt-test.md      # ESP32 WiFi + MQTT 基本測試
-    ├── 04-web-ota-setup.md             # 網頁版 OTA（ElegantOTA）設定與踩坑記錄
-    └── 05-tailscale-remote-access.md   # 路由器 + 電腦裝 Tailscale，達成遠端OTA
+│   ├── main.cpp           <- 這個repo自己作為範例專案使用套件的方式
+│   └── secrets.h           (已gitignore)
+└── docs/                   <- 路由器/Mosquitto/Tailscale設定文件
 ```
 
-## 快速開始
-
-### 1. 環境需求
-
-- [VSCode](https://code.visualstudio.com/) + [PlatformIO 擴充套件](https://platformio.org/install/ide?install=vscode)
-- OpenWrt 路由器（已安裝 Mosquitto，見 `docs/01-openwrt-mosquitto-setup.md`）
-- ESP32 開發板 + USB 線（第一次燒錄一定要用）
-- [MQTT Explorer](http://mqtt-explorer.com/)（推薦，圖形化查看 MQTT 訊息）
-- curl（Windows 10/11 內建，注意 PowerShell 裡要打 `curl.exe` 不是 `curl`，見踩坑記錄）
-
-### 2. 設定機密資訊
-
-```bash
-cp src/secrets.example.h src/secrets.h
-```
-
-打開 `src/secrets.h`，填入你自己的 WiFi 帳密、MQTT Broker IP、OTA 上傳帳密。
-這個檔案已被 `.gitignore` 排除，不會被上傳到 GitHub。
-
-### 3. 第一次燒錄（USB）
-
-```bash
-pio run -t upload
-```
-
-（`platformio.ini` 預設沒有指定 `upload_protocol`，會直接走 USB，PlatformIO 自動抓 COM port）
-
-打開序列埠監控確認：
-
-```bash
-pio device monitor
-```
-
-應該會看到 WiFi 連線成功、MQTT 連線成功、`Web OTA 已就緒` 等訊息，並附上 OTA 上傳網址。
-
-### 4. 之後改用 Web OTA 更新（不用再插 USB）
-
-**方法 A：瀏覽器手動上傳**
-
-打開 `http://<ESP32的IP>/update`，輸入帳密，選擇 `.pio/build/esp32dev/firmware.bin` 上傳。
-
-**方法 B：一鍵腳本（Windows）**
-
-編輯 `upload_ota.bat`，把 `ESP32_IP`、`OTA_USER`、`OTA_PASS` 改成你自己的設定，之後：
-
-```bash
-upload_ota.bat
-```
-
-**方法 C：`pio run -t upload` 一行搞定**
-
-把 `platformio.ini` 裡「上傳方式二」那幾行取消註解，填好 IP 跟帳密，之後跟 USB 上傳用同一個指令：
-
-```bash
-pio run -t upload
-```
-
-詳細原理、遇到的坑（例如為什麼要先呼叫 `/ota/start` 才能呼叫 `/ota/upload`）都寫在
-`docs/04-web-ota-setup.md`。
-
-### 5. 遠端（不在家）也能 OTA
-
-需要先讓路由器跟你的電腦都加入同一個 [Tailscale](https://tailscale.com/) 網路，並讓路由器開啟
-Subnet Router 廣播區網。設定步驟見 `docs/05-tailscale-remote-access.md`。設定好之後，
-不管人在哪，上傳指令都完全一樣，不需要額外調整。
-
-## MQTT Topics
-
-| Topic | 方向 | 說明 |
-|---|---|---|
-| `esp32/test/pub` | ESP32 → 外部 | 每 3 秒發布一次心跳訊息（含編譯時間戳記，方便確認版本） |
-| `esp32/test/sub` | 外部 → ESP32 | 訂閱此 topic，可用來下指令給 ESP32 |
-| `esp32/debug/log` | ESP32 → 外部 | 除錯 log，不插 USB 也能看 |
-
-用 MQTT Explorer 連到你的路由器 IP，port 1883，即可即時查看。
-
-## 授權
-
-MIT
+套件本體放在 `lib/WirelessOTA/`，不是 `src/`，是為了避免外部專案透過 `lib_deps` 抓這個repo
+當套件時，把 `src/main.cpp`（連同它 include 的、不存在的 `secrets.h`）也一起誤判成套件原始碼
+去編譯，導致編譯失敗。`library.json` 裡的 `"build": {"srcDir": "lib/WirelessOTA"}` 明確告訴
+PlatformIO 只用這個資料夾當套件來源。

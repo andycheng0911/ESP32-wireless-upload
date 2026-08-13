@@ -12,8 +12,6 @@ lib_deps =
     https://github.com/andycheng0911/ESP32-wireless-upload.git
 ```
 
-> 如果 `lib-dev` 分支還沒合併回 `main`，要指定分支：
-> `https://github.com/andycheng0911/ESP32-wireless-upload.git#lib-dev`
 
 PlatformIO 會自動抓這個套件，以及它宣告的相依函式庫（AsyncTCP、ESPAsyncWebServer、ElegantOTA、PubSubClient）。
 

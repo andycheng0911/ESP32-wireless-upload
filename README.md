@@ -151,22 +151,4 @@ upload_command = curl.exe -s -u admin:你的OTA密碼 http://192.168.1.132/ota/s
 - 因為帳密直接寫在 `platformio.ini` 裡，這個檔案若要公開分享，記得改成非敏感密碼，或把
   `platformio.ini` 也排除在版本控制外。
 
-## 專案內部結構（套件維護者看這段）
 
-```
-ESP32-wireless-upload/
-├── library.json          <- 套件身分證，build.srcDir指向lib/WirelessOTA
-├── lib/
-│   └── WirelessOTA/
-│       ├── WirelessOTA.h
-│       └── WirelessOTA.cpp
-├── src/
-│   ├── main.cpp           <- 這個repo自己作為範例專案使用套件的方式
-│   └── secrets.h           (已gitignore)
-└── docs/                   <- 路由器/Mosquitto/Tailscale設定文件
-```
-
-套件本體放在 `lib/WirelessOTA/`，不是 `src/`，是為了避免外部專案透過 `lib_deps` 抓這個repo
-當套件時，把 `src/main.cpp`（連同它 include 的、不存在的 `secrets.h`）也一起誤判成套件原始碼
-去編譯，導致編譯失敗。`library.json` 裡的 `"build": {"srcDir": "lib/WirelessOTA"}` 明確告訴
-PlatformIO 只用這個資料夾當套件來源。

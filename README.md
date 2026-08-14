@@ -10,6 +10,7 @@ ESP32 的 WiFi + MQTT + Web OTA 通用套件。新專案只要 `#include <Wirele
 ```ini
 lib_deps =
     https://github.com/andycheng0911/ESP32-wireless-upload.git
+    ayushsharma82/ElegantOTA@^3.1.1
 ```
 
 

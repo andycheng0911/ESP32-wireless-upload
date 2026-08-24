@@ -10,9 +10,10 @@ ESP32 的 WiFi + MQTT + Web OTA 通用套件。新專案只要 `#include <Wirele
 ```ini
 lib_deps =
     https://github.com/andycheng0911/ESP32-wireless-upload.git
-    ayushsharma82/ElegantOTA@^3.1.1
 ```
 
+> 如果 `lib-dev` 分支還沒合併回 `main`，要指定分支：
+> `https://github.com/andycheng0911/ESP32-wireless-upload.git#lib-dev`
 
 PlatformIO 會自動抓這個套件，以及它宣告的相依函式庫（AsyncTCP、ESPAsyncWebServer、ElegantOTA、PubSubClient）。
 
@@ -73,8 +74,8 @@ void begin(const char* ssid,
            uint16_t mqttPort = 1883,
            const char* otaUsername = nullptr,   // 傳nullptr表示OTA網頁不設密碼
            const char* otaPassword = nullptr,
-           const char* mqttClientId = "esp32",  // MQTT連線用的client id，多台裝置要取不同名字
-           const char* debugTopic = "esp32/debug/log");  // wireless.log會發布到這個topic
+           const char* mqttClientId = "esp32",  // MQTT連線用的client id，多台裝置一定要取不同名字
+           const char* debugTopic = nullptr);   // 傳nullptr（預設）會自動用"<mqttClientId>/debug/log"
 ```
 
 ### `wireless.loop()`
@@ -131,6 +132,34 @@ wireless.onConnected(onMqttConnected);
 
 回傳目前連線狀態的bool。
 
+## 同一個內網跑多台ESP32
+
+每台裝置的 `secrets.h` 加一個裝置專屬名稱，其他都不用改：
+
+```cpp
+#define DEVICE_NAME "esp32-livingroom"   // 每台裝置改這一行就好，取不同名字
+```
+
+`main.cpp` 呼叫 `begin()` 時把 `DEVICE_NAME` 當 `mqttClientId` 傳進去，`debugTopic` 不用傳，
+會自動變成 `"esp32-livingroom/debug/log"`：
+
+```cpp
+wireless.begin(WIFI_SSID, WIFI_PASSWORD, MQTT_SERVER, MQTT_PORT,
+                OTA_USERNAME, OTA_PASSWORD, DEVICE_NAME);
+```
+
+**為什麼一定要改名字**：
+- MQTT協定規定同一個broker上，Client ID撞名時，broker會把先連上的那個踢掉——兩台裝置用同一個
+  `mqttClientId`會一直互相把對方擠下線。
+- Topic如果都一樣（例如都發到 `esp32/status`），在MQTT端會分不出訊息是哪台裝置發的。
+
+`DEVICE_NAME`不同，`mqttClientId`跟`debugTopic`就自動分開了，用
+`mosquitto_sub -h <MQTT_IP> -t '+/debug/log'` 可以一次看到所有裝置的log，
+用 `mosquitto_sub -h <MQTT_IP> -t 'esp32-livingroom/debug/log'` 則只看單一台。
+
+另外建議去路由器（OpenWrt）後台幫每台ESP32的MAC位址設定「靜態IP保留」，這樣OTA更新時
+`http://<裝置IP>/update` 的網址才不會因為DHCP重新分配而變動。
+
 ## OTA更新（遠端，不需接USB）
 
 網頁固定在 `http://<裝置IP>/update`，有設 `otaUsername`/`otaPassword` 的話會跳出登入視窗。
@@ -152,4 +181,22 @@ upload_command = curl.exe -s -u admin:你的OTA密碼 http://192.168.1.132/ota/s
 - 因為帳密直接寫在 `platformio.ini` 裡，這個檔案若要公開分享，記得改成非敏感密碼，或把
   `platformio.ini` 也排除在版本控制外。
 
+## 專案內部結構（套件維護者看這段）
 
+```
+ESP32-wireless-upload/
+├── library.json          <- 套件身分證，build.srcDir指向lib/WirelessOTA
+├── lib/
+│   └── WirelessOTA/
+│       ├── WirelessOTA.h
+│       └── WirelessOTA.cpp
+├── src/
+│   ├── main.cpp           <- 這個repo自己作為範例專案使用套件的方式
+│   └── secrets.h           (已gitignore)
+└── docs/                   <- 路由器/Mosquitto/Tailscale設定文件
+```
+
+套件本體放在 `lib/WirelessOTA/`，不是 `src/`，是為了避免外部專案透過 `lib_deps` 抓這個repo
+當套件時，把 `src/main.cpp`（連同它 include 的、不存在的 `secrets.h`）也一起誤判成套件原始碼
+去編譯，導致編譯失敗。`library.json` 裡的 `"build": {"srcDir": "lib/WirelessOTA"}` 明確告訴
+PlatformIO 只用這個資料夾當套件來源。

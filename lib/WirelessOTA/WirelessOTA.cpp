@@ -44,7 +44,8 @@ void WirelessOTA::begin(const char* ssid,
     _mqttClientId = mqttClientId;
 
     log._owner = this;
-    log._topic = debugTopic;
+    // debugTopic沒指定的話，自動用 "<mqttClientId>/debug/log"，確保多台裝置log topic自動分開
+    log._topic = (debugTopic != nullptr) ? String(debugTopic) : (String(mqttClientId) + "/debug/log");
 
     _connectWiFi();
 

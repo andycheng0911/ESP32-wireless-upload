@@ -29,13 +29,15 @@ void setup() {
   wireless.onConnected(onMqttConnected);
 
   wireless.begin(
-    WIFI_SSID,
-    WIFI_PASSWORD,
-    MQTT_SERVER,
-    MQTT_PORT,
-    OTA_USERNAME,
-    OTA_PASSWORD
-  );
+  WIFI_SSID,
+  WIFI_PASSWORD, 
+  MQTT_SERVER, 
+  MQTT_PORT,
+  OTA_USERNAME, 
+  OTA_PASSWORD,
+  DEVICE_NAME   // mqttClientId，debugTopic不用傳了，自動變成 "esp32-livingroom/debug/log"
+);
+
 }
 
 unsigned long lastMsg = 0;

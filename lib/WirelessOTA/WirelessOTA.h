@@ -33,7 +33,9 @@ public:
     WirelessOTA();
 
     // otaUsername/otaPassword 傳 nullptr 表示OTA網頁不設密碼保護
-    // debugTopic：wireless.log 印出的每一行會發布到這個topic
+    // mqttClientId：MQTT連線識別碼，多台裝置一定要取不同名字，不然會互相把對方擠下線
+    // debugTopic：wireless.log 印出的每一行會發布到這個topic。傳nullptr（預設）
+    //             會自動用 "<mqttClientId>/debug/log"，多台裝置的log topic自動分開，不用手動拼字串
     void begin(const char* ssid,
                const char* password,
                const char* mqttHost,
@@ -41,7 +43,7 @@ public:
                const char* otaUsername = nullptr,
                const char* otaPassword = nullptr,
                const char* mqttClientId = "esp32",
-               const char* debugTopic = "esp32/debug/log");
+               const char* debugTopic = nullptr);
 
     // 放在 loop() 裡呼叫，處理WiFi/MQTT自動重連 + MQTT收發 + OTA
     void loop();
